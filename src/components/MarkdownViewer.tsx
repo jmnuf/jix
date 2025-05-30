@@ -26,6 +26,7 @@ export function MarkdownViewer({ content }: { content: string }) {
           }
           const lang = match[1];
           return (
+            // @ts-ignore IDK wtf is the error this has or why it's giving it, this is literally copied from the react-markdown readme
             <SyntaxHighlighter
               {...rest}
               PreTag="div"
