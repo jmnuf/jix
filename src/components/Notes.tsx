@@ -73,7 +73,7 @@ interface ListNotesProps {
 }
 
 export function ListNotes({ notebookId, onSelected }: ListNotesProps) {
-  const notes = useLiveQuery(() => db.notes.where('notebookId').equals(notebookId).toArray()) ?? [];
+  const notes = useLiveQuery(() => db.notes.where('notebookId').equals(notebookId).toArray(), [notebookId]) ?? [];
 
   return (
     <ul className="flex flex-wrap gap-2">

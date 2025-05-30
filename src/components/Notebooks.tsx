@@ -89,7 +89,7 @@ export function ListNotebooks(props: ListNotebooksProps) {
 }
 
 function NoteboookCard({ nb }: { nb: Notebook }) {
-  const notesCount = useLiveQuery(() => db.notes.where('notebookId').equals(nb.id).count());
+  const notesCount = useLiveQuery(() => db.notes.where('notebookId').equals(nb.id).count(), [nb.id]);
   const [emoji, setEmoji] = useState('');
   useEffect(() => {
     const all_emojis = ['📓', '📘', '📗', '📕', '📙', '📔'];
