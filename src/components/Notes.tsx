@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
   Card,
@@ -127,6 +127,8 @@ export function NoteViewer(props: NoteViewerProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  const todosInfo = useMemo(() => lexTodos(note.content), [note]);
+
   if (isEditing) {
     return (
       <article className="flex flex-col justify-center">
@@ -140,7 +142,7 @@ export function NoteViewer(props: NoteViewerProps) {
                 event.preventDefault();
                 setIsSaving(true);
                 const updated: Note = { ...note, content, synced: 0 };
-                db.notes.put(updated).finally(() => {
+                saveNoteLocally(updated).then(() => {
                   setIsSaving(false);
                   setIsEditing(false);
                   setNote(updated);
@@ -172,6 +174,7 @@ export function NoteViewer(props: NoteViewerProps) {
     );
   }
 
+
   return (
     <article className="flex flex-col justify-center">
       <header className="flex-col w-full py-4 justify-center items-center text-center">
@@ -197,9 +200,56 @@ export function NoteViewer(props: NoteViewerProps) {
         </div>
       </header>
       <div className="w-3/4 mx-auto note-viewing">
-        <MarkdownViewer content={note.content} />
+        <MarkdownViewer content={note.content} onCheckboxChange={({ checked, index }) => {
+          const info = todosInfo[index];
+          if (!info) return;
+          const args: [string, string] = checked ? ['- [x]', '- [ ]'] : ['- [ ]', '- [x]'];
+          const line = info.line.replace(...args);
+          const pre = note.content.substring(0, info.lineStart);
+          const pst = note.content.substring(info.lineEnd);
+
+          const newContent = `${pre}${line}${pst}`;
+          const newNote = { ...note, content: newContent };
+
+          setNote(newNote);
+          setContent(newContent);
+          saveNoteLocally(newNote);
+        }} />
       </div>
     </article>
   );
 }
+
+function lexTodos(content: string) {
+  let index = 0;
+  const todos: Array<{ lineStart: number; lineEnd: number; line: string; }> = [];
+  while (index < content.length) {
+    const ch = content[index];
+    if (ch == '\n') {
+      index += 1;
+      const lineStart = index;
+      while (index < content.length) {
+        index += 1
+        if (content[index] == '\n') {
+          break;
+        }
+      }
+      const lineEnd = Math.min(index, content.length);
+      const line = content.substring(lineStart, lineEnd);
+      const trimed = line.trimStart();
+      if (trimed.startsWith('- [ ] ') || trimed.startsWith('- [x] ') || trimed.startsWith('- [X] ')) {
+        todos.push({ lineStart, lineEnd, line });
+      }
+      continue;
+    }
+    index += 1;
+  }
+  return todos;
+}
+
+const saveNoteLocally = (note: Note) =>
+  db.notes.put(note)
+    .then((value) => ({ ok: true, value } as const))
+    .catch((error) => ({ ok: false, error } as const));
+
 

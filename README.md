@@ -8,7 +8,7 @@ This project aims to be a sem-local-first app that is cheap to deploy and relati
 
 Things I want to do (this list doesn't reflect what will be made):
 - [x] Basic Markdown rendering
-- [ ] Interactive checkboxes in markdown view mode
+- [x] Interactive checkboxes in markdown view mode
 - [ ] Encrypt note content, note name, and notebook name
 - [ ] Turn into a PWA
 - [ ] Backup data in some Database
