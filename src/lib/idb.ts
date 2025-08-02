@@ -7,8 +7,13 @@ export interface Note {
   creatorId: string;
   notebookId: string;
   name: string;
-  content: string;
+  content: Uint8Array | ArrayBuffer;
+  public: CBool;
   synced: CBool;
+}
+
+export type ParsedNote = {
+  [K in keyof Note]: K extends 'content' ? string : Note[K];
 }
 
 export interface Notebook {
@@ -19,15 +24,27 @@ export interface Notebook {
 }
 
 class JixDexie extends Dexie {
-  notes!: EntityTable<Note>;
-  notebooks!: EntityTable<Notebook>;
+  notes!: EntityTable<Note, 'id', Note>;
+  notebooks!: EntityTable<Notebook, 'id', Notebook>;
 
   constructor() {
     super('jix:notes');
-    this.version(1).stores({
-      notes: 'id, creatorId, notebookId, name, content, synced',
-      notebooks: 'id, creatorId, name, synced',
-    });
+    this.version(2)
+      .stores({
+        notes: 'id, creatorId, notebookId, name, content, public, synced',
+        notebooks: 'id, creatorId, name, synced',
+      })
+      .upgrade(tx => {
+        const encoder = new TextEncoder();
+        return tx.table('notes')
+          .toCollection()
+          .modify(obj => {
+            const pub = typeof obj.content == 'string';
+            obj.content = pub ? encoder.encode(obj.content) : obj.content;
+            obj.public = pub ? 1 : (obj.public ?? 1);
+          });
+      });
+
   }
 }
 

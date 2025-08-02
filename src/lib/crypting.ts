@@ -1,3 +1,8 @@
+import { Result } from './utils';
+
+export type Rsa_Key_Pair = Awaited<ReturnType<typeof generate_rsa_keys>>;
+
+export const generate_iv = () => crypto.getRandomValues(new Uint8Array(12));
 
 export async function key_downloader(kind: 'public' | 'private', key: CryptoKey) {
   const file_name = kind == 'public' ? 'pub.key' : 'priv.key';
@@ -31,7 +36,7 @@ export async function generate_rsa_keys() {
     ['encrypt', 'decrypt']
   );
 
-  const crypt = key_encryption_helpers(keys);
+  const crypt = rsa_encryption_helpers(keys);
   return {
     get private_key() { return keys.privateKey; },
     get public_key() { return keys.publicKey; },
@@ -44,7 +49,7 @@ export async function generate_rsa_keys() {
   };
 }
 
-export function key_encryption_helpers({ privateKey, publicKey }: { privateKey: CryptoKey; publicKey: CryptoKey }) {
+export function rsa_encryption_helpers({ privateKey, publicKey }: { privateKey: CryptoKey; publicKey: CryptoKey }) {
   return {
     encrypt: async (data: string | BufferSource) => {
       const encoder = new TextEncoder();
@@ -67,6 +72,56 @@ export function key_encryption_helpers({ privateKey, publicKey }: { privateKey: 
   } as const;
 }
 
+
+export async function import_rsa_key(kind: 'public' | 'private', bytes: Uint8Array | ArrayBuffer): Promise<Result<CryptoKey, string>> {
+  const format = kind == 'public' ? 'spki' : 'pkcs8';
+
+  const usages: KeyUsage[] = [kind == 'public' ? 'encrypt' : 'decrypt'];
+  const extractable = true;
+
+  try {
+    const key = await crypto.subtle.importKey(
+      format,
+      bytes,
+      {
+        name: 'RSA-OAEP',
+        hash: 'SHA-256',
+      },
+      extractable,
+      usages,
+    );
+    return Result.Ok(key);
+  } catch (e) {
+    const { name, message } = e as Error;
+    return Result.Err(`${name}: ${message}`);
+  }
+}
+
+export async function import_rsa_pair(
+  bytesPair: { privateKey: Uint8Array | ArrayBuffer; publicKey: Uint8Array | ArrayBuffer; }
+): Promise<Result<Rsa_Key_Pair, string>> {
+  const private_key_result = await import_rsa_key('private', bytesPair.privateKey);
+  if (!private_key_result.ok) return private_key_result;
+  const public_key_result = await import_rsa_key('public', bytesPair.publicKey);
+  if (!public_key_result.ok) return public_key_result;
+
+  const keys = {
+    privateKey: private_key_result.value,
+    publicKey: public_key_result.value,
+  };
+
+  const crypt = rsa_encryption_helpers(keys);
+  return Result.Ok({
+    get private_key() { return keys.privateKey; },
+    get public_key() { return keys.publicKey; },
+
+    export_private_key: () => crypto.subtle.exportKey('pkcs8', keys.privateKey),
+    export_public_key: () => crypto.subtle.exportKey('spki', keys.publicKey),
+
+    encrypt: crypt.encrypt,
+    decrypt: crypt.decrypt,
+  });
+}
 
 // ===============================================
 // |
@@ -102,8 +157,6 @@ export async function import_ecdh_key(buffer: ArrayBuffer | Uint8Array) {
     ['deriveKey']
   )
 }
-
-export const generate_iv = () => crypto.getRandomValues(new Uint8Array(12));
 
 export function key_deriver(private_key: CryptoKey) {
   return async (public_key: CryptoKey) => {

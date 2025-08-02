@@ -28,8 +28,9 @@ export function AddNoteForm({ notebookId, onCreated }: AddNoteFormProps) {
       await db.notes.add({
         id, name,
         notebookId,
-        content: '',
+        content: new Uint8Array(),
         creatorId: userId,
+        public: 1,
         synced: 0,
       });
       setStatus('Notebook created');
@@ -69,11 +70,17 @@ export function AddNoteForm({ notebookId, onCreated }: AddNoteFormProps) {
 
 interface ListNotesProps {
   notebookId: string;
-  onSelected: (note: Note) => void;
+  onSelected: (noteId: string) => void;
 }
 
 export function ListNotes({ notebookId, onSelected }: ListNotesProps) {
-  const notes = useLiveQuery(() => db.notes.where('notebookId').equals(notebookId).toArray(), [notebookId]) ?? [];
+  const notes = useLiveQuery(
+    () => db.notes
+      .where('notebookId')
+      .equals(notebookId)
+      .toArray(),
+    [notebookId]
+  ) ?? [];
 
   return (
     <ul className="flex flex-wrap gap-2">
@@ -84,7 +91,7 @@ export function ListNotes({ notebookId, onSelected }: ListNotesProps) {
               href={`/u/${n.creatorId}/note/${n.id}`}
               onClick={(event) => {
                 event.preventDefault();
-                onSelected(n);
+                onSelected(n.id);
               }}
             >
               <NoteCard note={n} />
@@ -121,13 +128,22 @@ interface NoteViewerProps {
   onExit: () => void;
 }
 
+const get_note_content = (n: Note) =>
+  n.content.byteLength == 0
+    ? ''
+    : n.public == 1 ? (new TextDecoder().decode(n.content)) : 'TODO: Decrypt and decode private notes';
+
+const encode_note_content = (content: string, is_public: boolean) =>
+  is_public ? new TextEncoder().encode(content) : Uint8Array.from([0, 0, 0]);
+
 export function NoteViewer(props: NoteViewerProps) {
   const [note, setNote] = useState(props.note);
-  const [content, setContent] = useState(note.content);
+  const base_content = useMemo(() => get_note_content(note), [note]);
+  const [content, setContent] = useState(base_content);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  const todosInfo = useMemo(() => lexTodos(note.content), [note]);
+  const todosInfo = useMemo(() => lexTodos(base_content), [note]);
 
   if (isEditing) {
     return (
@@ -140,13 +156,20 @@ export function NoteViewer(props: NoteViewerProps) {
               disabled={isSaving}
               onClick={(event) => {
                 event.preventDefault();
+                if (isSaving) return;
                 setIsSaving(true);
-                const updated: Note = { ...note, content, synced: 0 };
-                saveNoteLocally(updated).then(() => {
-                  setIsSaving(false);
-                  setIsEditing(false);
-                  setNote(updated);
-                });;
+                const encoded_content = encode_note_content(content, note.public == 1);
+                db.notes
+                  .update(props.note.id, (n) => {
+                    n.content = encoded_content;
+                    n.public = 1;
+                  })
+                  .then(() => db.notes.where('id').equals(note.id).first())
+                  .then((updated) => {
+                    setIsSaving(false);
+                    setIsEditing(false);
+                    setNote(updated ?? { ...note, content: encoded_content, public: 1 });
+                  });
               }}
             >Save</Button>
 
@@ -156,7 +179,7 @@ export function NoteViewer(props: NoteViewerProps) {
               onClick={(event) => {
                 event.preventDefault();
                 setIsEditing(false);
-                setContent(note.content);
+                setContent(base_content);
               }}
             >Cancel</Button>
           </div>
@@ -170,7 +193,7 @@ export function NoteViewer(props: NoteViewerProps) {
           disabled={isSaving}
           onChange={(event) => setContent(event.target.value)}
         ></textarea>
-      </article>
+      </article >
     );
   }
 
@@ -200,16 +223,16 @@ export function NoteViewer(props: NoteViewerProps) {
         </div>
       </header>
       <div className="w-3/4 mx-auto note-viewing">
-        <MarkdownViewer content={note.content} onCheckboxChange={({ checked, index }) => {
+        <MarkdownViewer content={base_content} onCheckboxChange={({ checked, index }) => {
           const info = todosInfo[index];
           if (!info) return;
           const args: [string, string] = checked ? ['- [x]', '- [ ]'] : ['- [ ]', '- [x]'];
           const line = info.line.replace(...args);
-          const pre = note.content.substring(0, info.lineStart);
-          const pst = note.content.substring(info.lineEnd);
+          const pre = base_content.substring(0, info.lineStart);
+          const pst = base_content.substring(info.lineEnd);
 
           const newContent = `${pre}${line}${pst}`;
-          const newNote = { ...note, content: newContent };
+          const newNote = { ...note, content: encode_note_content(newContent, note.public == 1) };
 
           setNote(newNote);
           setContent(newContent);

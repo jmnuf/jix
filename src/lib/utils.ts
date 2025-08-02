@@ -5,6 +5,20 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
+export const Result = Object.freeze({
+  Ok<T, E>(value: T): Result<T, E> {
+    return { ok: true, value };
+  },
+  Err<T, E>(error: E): Result<T, E> {
+    return { ok: false, error };
+  },
+} as const);
+
+
+export const doTry = <T>(promise: Promise<T>): Promise<Result<T, unknown>> =>
+  promise.then(value => Result.Ok(value)).catch(err => Result.Err(err));
+
 export async function getUserId() {
   return 'jmnuf';
 }
