@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import {
   Card,
   CardContent,
@@ -7,10 +6,10 @@ import {
   CardTitle,
 } from './ui/card';
 import { Button } from './ui/button';
-import { db, type Notebook } from '../lib/idb';
-import { getUserId } from '../lib/utils';
+import { db, useNotebookNotesCount, useNotebooksList, type Notebook } from '../lib/idb';
 
 interface AddNotebookFormProps {
+  userId: string;
   onCreated: (notebook: Notebook) => void;
 }
 
@@ -18,18 +17,19 @@ export function AddNotebookForm(props: AddNotebookFormProps) {
   const [isAdding, setIsAdding] = useState(false);
   const [name, setName] = useState('');
   const [status, setStatus] = useState('');
+  const userId = props.userId;
 
   const addNotebook = async () => {
     try {
-      const id = crypto.randomUUID();
-      const userId = await getUserId();
-      await db.notebooks.add({
+      const id = userId + ':' + crypto.randomUUID();
+      await db.put_notebook({
         id, name,
         creatorId: userId,
         synced: 0,
+        public: 1,
       });
-      setStatus('Notebook created');
-      const nb = (await db.notebooks.where('id').equals(id).first())!;
+      setStatus(`Created notebook: ${name}`);
+      const nb = (await db.get_notebook(id))!;
       props.onCreated(nb);
     } catch (err) {
       setStatus(`Failed to add notebook ${name}: ${err}`);
@@ -64,15 +64,23 @@ export function AddNotebookForm(props: AddNotebookFormProps) {
 }
 
 interface ListNotebooksProps {
+  userId: string;
   onSelected: (notebook: Notebook) => void;
 }
 
 export function ListNotebooks(props: ListNotebooksProps) {
-  const notebooks = useLiveQuery(() => db.notebooks.toArray()) ?? [];
+  const data = useNotebooksList(props.userId);
+  if (data.loading) {
+    return (
+      <div className="flex flex-wrap gap-2">
+        <p>Loading notebooks...</p>
+      </div>
+    );
+  }
 
   return (
     <ul className="flex flex-wrap gap-2">
-      {notebooks.map((nb) => {
+      {data.list.map((nb) => {
         return (
           <li key={nb.id}>
             <a href={`/u/${nb.creatorId}/notebook/${nb.id}`} onClick={(event) => {
@@ -89,21 +97,21 @@ export function ListNotebooks(props: ListNotebooksProps) {
 }
 
 function NoteboookCard({ nb }: { nb: Notebook }) {
-  const notesCount = useLiveQuery(() => db.notes.where('notebookId').equals(nb.id).count(), [nb.id]);
+  const data = useNotebookNotesCount(nb.id);
   const [emoji, setEmoji] = useState('');
   useEffect(() => {
     const all_emojis = ['📓', '📘', '📗', '📕', '📙', '📔'];
     const idx = Math.floor(Math.random() * all_emojis.length);
-    setEmoji(all_emojis[idx] + ' ');
+    setEmoji(all_emojis[idx]);
   }, [nb.id]);
 
   return (
     <Card className="min-w-[200px]">
       <CardHeader>
-        <CardTitle>{emoji}{nb.name}</CardTitle>
+        <CardTitle>{emoji}{' '}{nb.name}</CardTitle>
       </CardHeader>
       <CardContent>
-        <p>Holds {notesCount} notes</p>
+        <p>{data.loading ? 'Counting notes...' : `Holds ${data.count} notes`}</p>
       </CardContent>
     </Card>
   );

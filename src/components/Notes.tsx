@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import {
   Card,
   CardContent,
@@ -7,34 +6,34 @@ import {
   CardTitle,
 } from './ui/card';
 import { Button } from './ui/button';
-import { db, type Note } from '../lib/idb';
-import { getUserId } from '../lib/utils';
+import { db, useNotesListFromNotebook, type Note } from '../lib/idb';
+import { get_encryption_helpers } from '../lib/utils';
 import { MarkdownViewer } from './MarkdownViewer';
 
 interface AddNoteFormProps {
+  userId: string;
   notebookId: string;
   onCreated: (note: Note) => void;
 }
 
-export function AddNoteForm({ notebookId, onCreated }: AddNoteFormProps) {
+export function AddNoteForm({ userId, notebookId, onCreated }: AddNoteFormProps) {
   const [isAdding, setIsAdding] = useState(false);
   const [name, setName] = useState('');
   const [status, setStatus] = useState('');
 
   const addNote = async () => {
     try {
-      const id = crypto.randomUUID();
-      const userId = await getUserId();
-      await db.notes.add({
+      const id = userId + ':' + crypto.randomUUID();
+      await db.put_note({
         id, name,
         notebookId,
-        content: new Uint8Array(),
+        content: '',
         creatorId: userId,
         public: 1,
         synced: 0,
       });
-      setStatus('Notebook created');
-      const note = (await db.notes.where('id').equals(id).first())!;
+      setStatus(`Created notebook: ${name}`);
+      const note = (await db.get_note(id))!;
       onCreated(note);
     } catch (err) {
       setStatus(`Failed to add notebook ${name}: ${err}`);
@@ -74,17 +73,18 @@ interface ListNotesProps {
 }
 
 export function ListNotes({ notebookId, onSelected }: ListNotesProps) {
-  const notes = useLiveQuery(
-    () => db.notes
-      .where('notebookId')
-      .equals(notebookId)
-      .toArray(),
-    [notebookId]
-  ) ?? [];
+  const data = useNotesListFromNotebook(notebookId);
+  if (data.loading) {
+    return (
+      <ul className="flex flex-wrap gap-2">
+        <li>Loading notes...</li>
+      </ul>
+    );
+  }
 
   return (
     <ul className="flex flex-wrap gap-2">
-      {notes.map((n) => {
+      {data.list.map((n) => {
         return (
           <li key={n.id}>
             <a
@@ -128,17 +128,9 @@ interface NoteViewerProps {
   onExit: () => void;
 }
 
-const get_note_content = (n: Note) =>
-  n.content.byteLength == 0
-    ? ''
-    : n.public == 1 ? (new TextDecoder().decode(n.content)) : 'TODO: Decrypt and decode private notes';
-
-const encode_note_content = (content: string, is_public: boolean) =>
-  is_public ? new TextEncoder().encode(content) : Uint8Array.from([0, 0, 0]);
-
 export function NoteViewer(props: NoteViewerProps) {
   const [note, setNote] = useState(props.note);
-  const base_content = useMemo(() => get_note_content(note), [note]);
+  const base_content = note.content;
   const [content, setContent] = useState(base_content);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -158,17 +150,24 @@ export function NoteViewer(props: NoteViewerProps) {
                 event.preventDefault();
                 if (isSaving) return;
                 setIsSaving(true);
-                const encoded_content = encode_note_content(content, note.public == 1);
                 db.notes
                   .update(props.note.id, (n) => {
-                    n.content = encoded_content;
-                    n.public = 1;
+                    const encryption = get_encryption_helpers();
+                    const encoder = new TextEncoder();
+                    if (encryption) {
+                      n.content = encryption.encrypt(encoder.encode(content));
+                      n.public = 0;
+                    } else {
+                      n.content = encoder.encode(content);
+                      n.public = 1;
+                    }
                   })
-                  .then(() => db.notes.where('id').equals(note.id).first())
+                  .then(() => db.get_note(note.id))
                   .then((updated) => {
                     setIsSaving(false);
                     setIsEditing(false);
-                    setNote(updated ?? { ...note, content: encoded_content, public: 1 });
+                    // We know it exists cause we just put it
+                    setNote(updated!);
                   });
               }}
             >Save</Button>
@@ -232,7 +231,7 @@ export function NoteViewer(props: NoteViewerProps) {
           const pst = base_content.substring(info.lineEnd);
 
           const newContent = `${pre}${line}${pst}`;
-          const newNote = { ...note, content: encode_note_content(newContent, note.public == 1) };
+          const newNote = { ...note, content: newContent };
 
           setNote(newNote);
           setContent(newContent);
@@ -271,7 +270,7 @@ function lexTodos(content: string) {
 }
 
 const saveNoteLocally = (note: Note) =>
-  db.notes.put(note)
+  db.put_note(note)
     .then((value) => ({ ok: true, value } as const))
     .catch((error) => ({ ok: false, error } as const));
 
